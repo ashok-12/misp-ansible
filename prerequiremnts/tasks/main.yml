@@ -60,16 +60,14 @@
     update_cache: yes
   when: sudo_check.rc == 0
 
-- name: Install etckeeper with sudo
-  apt:
-    name: etckeeper
-    state: present
-  when: sudo_check.rc == 0
 
-- name: Notify user to re-login if added to sudo group
-  debug:
-    msg: "User {{ misp_user }} has been added to the sudo group. Please log out and log in again."
-  when: sudo_check.rc != 0
+#########################################################
+####add the misp user to staff and www-data (mandatory)
+- name: Check if /usr/local/src exists and get its attributes
+  stat:
+    path: /usr/local/src
+  register: src_dir
+  ignore_errors: yes
 
 - name: Ensure /usr/local/src directory exists and has correct permissions
   block:
@@ -80,20 +78,20 @@
         mode: "2775"
         owner: root
         group: staff
-      when: not src_dir.stat.exists
+      when: src_dir.stat.exists == false
 
-    - name: Check if /usr/local/src is writable by MISP_USER
-      command: sudo -H -u {{ misp_user }} touch /usr/local/src
-      register: touch_result
-      ignore_errors: yes
-      changed_when: false
+    - name: Check if /usr/local/src is writable by {{ misp_user }}
+      set_fact:
+        src_writable_by_user: "{{ src_dir.stat.is_writable and src_dir.stat.uid == lookup('file', '/etc/passwd', splitlines=True | selectattr('startswith', misp_user)).split(':')[2] }}"
+      when: src_dir.stat.exists
 
-    - name: Set permissions on /usr/local/src if not writable by MISP_USER
+    - name: Set permissions on /usr/local/src if not writable by {{ misp_user }}
       file:
         path: /usr/local/src
         mode: "2775"
         owner: root
         group: staff
-      when: touch_result.rc != 0
+      when: not src_writable_by_user|default(false)
 
-  when: not src_dir.stat.is_writable
+  when: src_dir.stat.exists|default(false) == false or src_dir.stat.is_writable|default(false) == false
+
