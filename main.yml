@@ -1,0 +1,7 @@
+---
+- hosts: all
+  become: yes
+  vars:
+    misp_user: "{{ lookup('env', 'MISP_USER') }}"
+  roles:
+    - { role: prerequiremnts }

@@ -1,0 +1,99 @@
+---
+- name: Upgrade system packages
+  block:
+    - name: Check if running in non-interactive mode
+      set_fact:
+        non_interactive: "{{ (lookup('env', 'PACKER') == '1' or lookup('env', 'UNATTENDED') == '1') | bool }}"
+
+    - name: Upgrade system in non-interactive mode
+      apt:
+        upgrade: dist
+        autoremove: yes
+        autoclean: yes
+        dpkg_options:
+          - "--force-confdef"
+          - "--force-confold"
+      environment:
+        DEBIAN_FRONTEND: noninteractive
+        DEBIAN_PRIORITY: critical
+      when: non_interactive
+
+    - name: Upgrade system in interactive mode
+      apt:
+        upgrade: dist
+        autoremove: yes
+        autoclean: yes
+      when: not non_interactive
+
+- name: Check if sudo is installed
+  command: which sudo
+  register: sudo_check
+  ignore_errors: yes
+
+- name: Install etckeeper without sudo
+  apt:
+    name: etckeeper
+    state: present
+  when: sudo_check.rc != 0
+
+- name: Install sudo
+  apt:
+    name: sudo
+    state: present
+  when: sudo_check.rc != 0
+
+- name: Install curl
+  apt:
+    name: curl
+    state: present
+  when: sudo_check.rc != 0
+
+- name: Add user to sudo group
+  user:
+    name: "{{ misp_user }}"
+    groups: sudo
+    append: yes
+  when: sudo_check.rc != 0
+
+- name: Update package list
+  apt:
+    update_cache: yes
+  when: sudo_check.rc == 0
+
+- name: Install etckeeper with sudo
+  apt:
+    name: etckeeper
+    state: present
+  when: sudo_check.rc == 0
+
+- name: Notify user to re-login if added to sudo group
+  debug:
+    msg: "User {{ misp_user }} has been added to the sudo group. Please log out and log in again."
+  when: sudo_check.rc != 0
+
+- name: Ensure /usr/local/src directory exists and has correct permissions
+  block:
+    - name: Create /usr/local/src directory if it doesn't exist
+      file:
+        path: /usr/local/src
+        state: directory
+        mode: "2775"
+        owner: root
+        group: staff
+      when: not src_dir.stat.exists
+
+    - name: Check if /usr/local/src is writable by MISP_USER
+      command: sudo -H -u {{ misp_user }} touch /usr/local/src
+      register: touch_result
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Set permissions on /usr/local/src if not writable by MISP_USER
+      file:
+        path: /usr/local/src
+        mode: "2775"
+        owner: root
+        group: staff
+      when: touch_result.rc != 0
+
+  when: not src_dir.stat.is_writable
